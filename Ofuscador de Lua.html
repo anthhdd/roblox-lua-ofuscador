@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ofuscador de Lua</title>
+<style>
+:root{
+  --bg:#0f1115; --panel:#161a22; --border:#262b36; --text:#e7e9ee; --muted:#9aa3b2;
+  --accent2:#60a5fa; --mono: 'Fira Code','Consolas',monospace;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    --bg:#f6f7fb; --panel:#ffffff; --border:#e3e6ee; --text:#171a21; --muted:#5b6475;
+    --accent2:#2563eb; color-scheme: light;
+  }
+}
+:root[data-theme="dark"]{ --bg:#0f1115; --panel:#161a22; --border:#262b36; --text:#e7e9ee; --muted:#9aa3b2; --accent2:#60a5fa; color-scheme: dark; }
+*{box-sizing:border-box;}
+html,body{height:100%;}
+body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+  padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);}
+header{padding:20px 24px;border-bottom:1px solid var(--border);}
+h1{margin:0 0 4px;font-size:1.4rem;}
+p.sub{margin:0;color:var(--muted);font-size:.9rem;}
+main{display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:20px 24px;max-width:1400px;margin:0 auto;}
+@media(max-width:900px){main{grid-template-columns:1fr;}}
+.panel{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:10px;}
+textarea{width:100%;min-height:320px;resize:vertical;background:transparent;color:var(--text);border:1px solid var(--border);border-radius:8px;padding:10px;font-family:var(--mono);font-size:.85rem;}
+.opts{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+label.chk{display:flex;align-items:center;gap:8px;font-size:.85rem;cursor:pointer;}
+input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent2);}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
+select{background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px;}
+button{background:var(--accent2);color:#06121f;border:none;padding:10px 16px;border-radius:8px;font-weight:600;cursor:pointer;}
+button.secondary{background:transparent;color:var(--text);border:1px solid var(--border);}
+button:active{transform:scale(.98);}
+.stats{font-size:.8rem;color:var(--muted);min-height:1.2em;}
+footer{text-align:center;color:var(--muted);font-size:.75rem;padding:20px;}
+h3{margin:0;font-size:.95rem;}
+</style>
+</head>
+<body>
+<header>
+<h1>🔒 Ofuscador de código Lua</h1>
+<p class="sub">Protege tus scripts Lua con varias técnicas de ofuscación — todo se procesa en tu navegador, nada se envía a ningún servidor.</p>
+</header>
+<main>
+<div class="panel">
+<h3>Código original</h3>
+<textarea id="input" placeholder="-- Pega aquí tu código Lua...
+local function saludo(nombre)
+  print('Hola, ' .. nombre)
+end
+saludo('Mundo')"></textarea>
+<div class="opts">
+<label class="chk"><input type="checkbox" id="optComments" checked> Eliminar comentarios</label>
+<label class="chk"><input type="checkbox" id="optMinify" checked> Minificar espacios</label>
+<label class="chk"><input type="checkbox" id="optRenameVars" checked> Renombrar variables locales</label>
+<label class="chk"><input type="checkbox" id="optStrings" checked> Codificar cadenas de texto</label>
+<label class="chk"><input type="checkbox" id="optNumbers"> Codificar números</label>
+<label class="chk"><input type="checkbox" id="optJunk"> Insertar código basura</label>
+</div>
+<div class="row">
+<label for="nameStyle" style="font-size:.85rem;color:var(--muted)">Estilo de nombres:</label>
+<select id="nameStyle">
+<option value="hex">Hexadecimal (_0x3fA2)</option>
+<option value="confuso" selected>Confuso (lI1l0O)</option>
+<option value="guiones">Guiones (____1_)</option>
+</select>
+</div>
+<div class="row">
+<button id="btnOfuscar">⚡ Ofuscar código</button>
+<button class="secondary" id="btnEjemplo">Cargar ejemplo</button>
+</div>
+</div>
+<div class="panel">
+<h3>Código ofuscado</h3>
+<textarea id="output" readonly placeholder="El resultado aparecerá aquí..."></textarea>
+<div class="stats" id="stats"></div>
+<div class="row">
+<button id="btnCopiar">📋 Copiar</button>
+<button class="secondary" id="btnDescargar">⬇️ Descargar .lua</button>
+</div>
+</div>
+</main>
+<footer>Herramienta de ofuscación básica con fines educativos y de protección de código. No garantiza seguridad absoluta frente a desofuscadores avanzados.</footer>
+<script>
+const KEYWORDS = new Set(['and','break','do','else','elseif','end','false','for','function','goto','if','in','local','nil','not','or','repeat','return','then','true','until','while']);
+const GLOBALS = new Set(['print','pairs','ipairs','table','string','math','os','io','tostring','tonumber','type','pcall','xpcall','require','setmetatable','getmetatable','rawget','rawset','rawequal','select','next','error','assert','unpack','_G','self','coroutine','load','loadstring','dofile']);
+
+function tokenize(src){
+  const toks=[]; let i=0; const n=src.length;
+  while(i<n){
+    const c=src[i];
+    if(c==='-'&&src[i+1]==='-'){
+      if(src[i+2]==='['&&(src[i+3]==='['||src[i+3]==='=')){
+        let eq=0,j=i+3; while(src[j]==='='){eq++;j++;}
+        if(src[j]==='['){ const close=']'+'='.repeat(eq)+']'; const end=src.indexOf(close,j+1);
+          const stop = end===-1? n : end+close.length; toks.push({t:'comment',v:src.slice(i,stop)}); i=stop; continue; }
+      }
+      let end=src.indexOf('\n',i); if(end===-1)end=n; toks.push({t:'comment',v:src.slice(i,end)}); i=end; continue;
+    }
+    if(c==='['&&(src[i+1]==='['||src[i+1]==='=')){
+      let eq=0,j=i+1; while(src[j]==='='){eq++;j++;}
+      if(src[j]==='['){ const close=']'+'='.repeat(eq)+']'; const end=src.indexOf(close,j+1);
+        const stop = end===-1? n : end+close.length; toks.push({t:'string',v:src.slice(i,stop),raw:true}); i=stop; continue; }
+    }
+    if(c==='"'||c==="'"){
+      const q=c; let j=i+1; let buf=q;
+      while(j<n && src[j]!==q){ if(src[j]==='\\'){buf+=src[j]+src[j+1]; j+=2;} else {buf+=src[j]; j++;} }
+      buf+=q; toks.push({t:'string',v:buf}); i=j+1; continue;
+    }
+    if(/[0-9]/.test(c) || (c==='.'&&/[0-9]/.test(src[i+1]))){
+      let j=i; let v='';
+      if(c==='0'&&(src[i+1]==='x'||src[i+1]==='X')){ j=i+2; v='0x'; while(/[0-9a-fA-F]/.test(src[j])){v+=src[j];j++;} }
+      else { while(/[0-9]/.test(src[j])){v+=src[j];j++;} if(src[j]==='.'){v+=src[j];j++; while(/[0-9]/.test(src[j])){v+=src[j];j++;}} if(src[j]==='e'||src[j]==='E'){v+=src[j];j++; if(src[j]==='+'||src[j]==='-'){v+=src[j];j++;} while(/[0-9]/.test(src[j])){v+=src[j];j++;}} }
+      toks.push({t:'number',v}); i=j; continue;
+    }
+    if(/[A-Za-z_]/.test(c)){
+      let j=i,v=''; while(j<n&&/[A-Za-z0-9_]/.test(src[j])){v+=src[j];j++;}
+      toks.push({t:KEYWORDS.has(v)?'keyword':'ident',v}); i=j; continue;
+    }
+    if(/\s/.test(c)){ let j=i; while(j<n&&/\s/.test(src[j]))j++; toks.push({t:'ws',v:src.slice(i,j)}); i=j; continue; }
+    toks.push({t:'sym',v:c}); i++;
+  }
+  return toks;
+}
+
+function randName(style,len){
+  len = len||6;
+  if(style==='hex'){ let s='_0x'; for(let i=0;i<4;i++) s+= '0123456789ABCDEF'[Math.floor(Math.random()*16)]; return s; }
+  if(style==='guiones'){ let s='_'; for(let i=0;i<len;i++) s+= Math.random()<0.5?'_':Math.floor(Math.random()*10); return s; }
+  const chars='lI1lO0'; let s=''; for(let i=0;i<len;i++) s+= chars[Math.floor(Math.random()*chars.length)];
+  return '_'+s;
+}
+
+function encodeString(raw){
+  if(raw.startsWith('[')) return raw;
+  const inner=raw.slice(1,-1);
+  let out='"';
+  for(let i=0;i<inner.length;i++){
+    if(inner[i]==='\\'){ out+=inner[i]+inner[i+1]; i++; continue; }
+    out += '\\'+inner.charCodeAt(i);
+  }
+  return out+'"';
+}
+
+function encodeNumber(v){
+  if(v.startsWith('0x')||v.includes('.')||v.includes('e')||v.includes('E')) return v;
+  const n=parseInt(v,10); if(isNaN(n)||n<2) return v;
+  const a=Math.floor(Math.random()*n); const b=n-a;
+  const ops=[ `(${a}+${b})`, `(${n+7}-7)`, `(${n}*1)` ];
+  return ops[Math.floor(Math.random()*ops.length)];
+}
+
+function junkStatement(style){
+  return `local ${randName(style)}=${Math.floor(Math.random()*999)};`;
+}
+
+function obfuscate(src,opts){
+  let toks = tokenize(src);
+  if(opts.comments) toks = toks.filter(t=>t.t!=='comment');
+
+  if(opts.renameVars){
+    const names=new Set();
+    for(let i=0;i<toks.length;i++){
+      if(toks[i].t==='keyword'&&toks[i].v==='local'){
+        let j=i+1;
+        while(j<toks.length && toks[j].t==='ws') j++;
+        if(toks[j]&&toks[j].t==='keyword'&&toks[j].v==='function'){
+          j++; while(toks[j]&&toks[j].t==='ws')j++;
+          if(toks[j]&&toks[j].t==='ident'){ names.add(toks[j].v); }
+        } else {
+          while(toks[j]){
+            if(toks[j].t==='ident') names.add(toks[j].v);
+            else if(toks[j].t==='sym'&&toks[j].v===',') {}
+            else if(toks[j].t==='ws') {}
+            else break;
+            j++;
+          }
+        }
+      }
+    }
+    [...names].forEach(nm=>{ if(GLOBALS.has(nm)) names.delete(nm); });
+    const map={};
+    names.forEach(nm=>{ map[nm]=randName(opts.nameStyle); });
+    toks = toks.map(t=> t.t==='ident'&&map[t.v] ? {t:'ident',v:map[t.v]} : t);
+  }
+
+  if(opts.strings) toks = toks.map(t=> t.t==='string' ? {t:'string',v:encodeString(t.v)} : t);
+  if(opts.numbers) toks = toks.map(t=> t.t==='number' ? {t:'raw',v:encodeNumber(t.v)} : t);
+
+  if(opts.junk){
+    const withJunk=[];
+    for(const t of toks){
+      withJunk.push(t);
+      if(t.t==='sym'&&t.v===';' && Math.random()<0.3) withJunk.push({t:'ws',v:' '},{t:'raw',v:junkStatement(opts.nameStyle)});
+    }
+    toks=withJunk;
+  }
+
+  let out='';
+  if(opts.minify){
+    for(let i=0;i<toks.length;i++){
+      const t=toks[i];
+      if(t.t==='ws') continue;
+      const prev=out.slice(-1);
+      const needsSpace = /[A-Za-z0-9_]/.test(prev) && /^[A-Za-z0-9_]/.test(t.v);
+      out += (needsSpace?' ':'') + t.v;
+    }
+  } else {
+    out = toks.map(t=>t.v).join('');
+  }
+  return out;
+}
+
+function getOpts(){
+  return {
+    comments: optComments.checked,
+    minify: optMinify.checked,
+    renameVars: optRenameVars.checked,
+    strings: optStrings.checked,
+    numbers: optNumbers.checked,
+    junk: optJunk.checked,
+    nameStyle: nameStyle.value
+  };
+}
+
+btnOfuscar.addEventListener('click', ()=>{
+  const src = input.value;
+  if(!src.trim()){ stats.textContent='Pega código primero.'; return; }
+  try{
+    const result = obfuscate(src, getOpts());
+    output.value = result;
+    const ratio = src.length? (result.length/src.length*100).toFixed(0):0;
+    stats.textContent = `Original: ${src.length} caracteres → Ofuscado: ${result.length} caracteres (${ratio}%)`;
+  }catch(e){
+    stats.textContent = 'Error al procesar: '+e.message;
+  }
+});
+
+btnEjemplo.addEventListener('click', ()=>{
+  input.value = "-- Script de ejemplo\nlocal function calcular(a, b)\n  local suma = a + b\n  local mensaje = \"El resultado es: \" .. suma\n  print(mensaje)\n  return suma\nend\n\nlocal x = 10\nlocal y = 20\ncalcular(x, y)";
+});
+
+btnCopiar.addEventListener('click', async ()=>{
+  if(!output.value) return;
+  try{ await navigator.clipboard.writeText(output.value); btnCopiar.textContent='✅ Copiado'; setTimeout(()=>btnCopiar.textContent='📋 Copiar',1500);}catch(e){}
+});
+
+btnDescargar.addEventListener('click', ()=>{
+  if(!output.value) return;
+  const blob=new Blob([output.value],{type:'text/plain'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='ofuscado.lua'; a.click();
+});
+</script>
+</body>
+</html>
